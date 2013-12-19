@@ -1,0 +1,11 @@
+{
+  "name": "marker-clusterer",
+  "version": "2.1.1",
+  "main": "marker-clusterer.js",
+  "dependencies": {
+  },
+  "ignore": [
+    "package.json",
+    "README.md"
+  ]
+}
