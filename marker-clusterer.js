@@ -1,4 +1,14 @@
 /**
+ * This version of MarkerClustererPlus has been modified by RentPath.
+ * It adds optional functionality to animate declustering of markers on zoom-in.
+ * To enable:
+ * Load the markerAnimate.js script (https://github.com/combatwombat/marker-animate).
+ * Set the new option "declusterAnimationDuration" to the duration of the animation in microseconds
+ * (defaults to 0, indicating no animation)
+ * FIXME: document other new options
+ */
+
+/**
  * @name MarkerClustererPlus for Google Maps V3
  * @version 2.1.1 [November 4, 2013]
  * @author Gary Little
@@ -156,7 +166,6 @@ ClusterIcon.prototype.onAdd = function () {
         // Zoom into the cluster.
         mz = mc.getMaxZoom();
         theBounds = cClusterIcon.cluster_.getBounds();
-        mc.getMap().fitBounds(theBounds);
         // There is a fix for Issue 170 here:
         setTimeout(function () {
           mc.getMap().fitBounds(theBounds);
@@ -578,6 +587,11 @@ Cluster.prototype.isMarkerAlreadyAdded_ = function (marker) {
 };
 
 
+Cluster.prototype.isIconVisible = function () {
+  return this.clusterIcon_.visible_;
+};
+
+
 /**
  * @name MarkerClustererOptions
  * @class This class represents the optional parameter passed to
@@ -673,6 +687,7 @@ function MarkerClusterer(map, opt_markers, opt_options) {
 
   this.markers_ = [];
   this.clusters_ = [];
+  this.oldClusters_ = [];
   this.listeners_ = [];
   this.activeMap_ = null;
   this.ready_ = false;
@@ -706,6 +721,10 @@ function MarkerClusterer(map, opt_markers, opt_options) {
   this.batchSizeIE_ = opt_options.batchSizeIE || MarkerClusterer.BATCH_SIZE_IE;
   this.clusterClass_ = opt_options.clusterClass || "cluster";
 
+  this.declusterAnimationDuration = opt_options.declusterAnimationDuration || 0;
+  this.declusterAnimationEasing = opt_options.declusterAnimationEasing || 'linear';
+  this.declusterAnimationMarkerThreshold = opt_options.declusterAnimationMarkerThreshold || 0;
+
   if (navigator.userAgent.toLowerCase().indexOf("msie") !== -1) {
     // Try to avoid IE timeout when processing a huge number of markers:
     this.batchSize_ = this.batchSizeIE_;
@@ -733,7 +752,6 @@ MarkerClusterer.prototype.onAdd = function () {
   // Add the map event listeners
   this.listeners_ = [
     google.maps.event.addListener(this.getMap(), "zoom_changed", function () {
-      cMarkerClusterer.resetViewport_(false);
       // Workaround for this Google bug: when map is at level 0 and "-" of
       // zoom slider is clicked, a "zoom_changed" event is fired even though
       // the map doesn't zoom out any further. In this situation, no "idle"
@@ -744,7 +762,7 @@ MarkerClusterer.prototype.onAdd = function () {
       }
     }),
     google.maps.event.addListener(this.getMap(), "idle", function () {
-      cMarkerClusterer.redraw_();
+      cMarkerClusterer.refresh_();
     })
   ];
 };
@@ -853,6 +871,7 @@ MarkerClusterer.prototype.setGridSize = function (gridSize) {
 MarkerClusterer.prototype.getMinimumClusterSize = function () {
   return this.minClusterSize_;
 };
+
 
 /**
  * Sets the value of the <code>minimumClusterSize</code> property.
@@ -1331,6 +1350,7 @@ MarkerClusterer.prototype.repaint = function () {
 
 /**
  * Returns the current bounds extended by the grid size.
+ * BEWARE: This mutates the `bounds` object passed in!
  *
  * @param {google.maps.LatLngBounds} bounds The bounds to extend.
  * @return {google.maps.LatLngBounds} The extended bounds.
@@ -1383,9 +1403,13 @@ MarkerClusterer.prototype.redraw_ = function () {
  */
 MarkerClusterer.prototype.resetViewport_ = function (opt_hide) {
   var i, marker;
-  // Remove all the clusters
+  // Hide all the cluster icons
   for (i = 0; i < this.clusters_.length; i++) {
-    this.clusters_[i].remove();
+    this.clusters_[i].clusterIcon_.setMap(null);
+  }
+  // Stash the cluster data for potential declustering animation.
+  if (this.clusters_.length) {
+    this.oldClusters_ = this.clusters_;
   }
   this.clusters_ = [];
 
@@ -1473,7 +1497,6 @@ MarkerClusterer.prototype.addToClosestCluster_ = function (marker) {
  */
 MarkerClusterer.prototype.createClusters_ = function (iFirst) {
   var i, marker;
-  var mapBounds;
   var cMarkerClusterer = this;
   if (!this.ready_) {
     return;
@@ -1496,17 +1519,7 @@ MarkerClusterer.prototype.createClusters_ = function (iFirst) {
     }
   }
 
-  // Get our current map view bounds.
-  // Create a new bounds object so we don't affect the map.
-  //
-  // See Comments 9 & 11 on Issue 3651 relating to this workaround for a Google Maps bug:
-  if (this.getMap().getZoom() > 3) {
-    mapBounds = new google.maps.LatLngBounds(this.getMap().getBounds().getSouthWest(),
-      this.getMap().getBounds().getNorthEast());
-  } else {
-    mapBounds = new google.maps.LatLngBounds(new google.maps.LatLng(85.02070771743472, -178.48388434375), new google.maps.LatLng(-85.08136444384544, 178.00048865625));
-  }
-  var bounds = this.getExtendedBounds(mapBounds);
+  var bounds = this.getExtendedMapBounds();
 
   var iLast = Math.min(iFirst + this.batchSize_, this.markers_.length);
 
@@ -1535,6 +1548,98 @@ MarkerClusterer.prototype.createClusters_ = function (iFirst) {
      */
     google.maps.event.trigger(this, "clusteringend", this);
   }
+};
+
+
+MarkerClusterer.prototype.getExtendedMapBounds = function () {
+  // Get our current map view bounds.
+  // Create a new bounds object so we don't affect the map.
+  //
+  // See Comments 9 & 11 on Issue 3651 relating to this workaround for a Google Maps bug:
+  var mapBounds;
+  if (this.getMap().getZoom() > 3) {
+    mapBounds = new google.maps.LatLngBounds(this.getMap().getBounds().getSouthWest(),
+      this.getMap().getBounds().getNorthEast());
+  } else {
+    mapBounds = new google.maps.LatLngBounds(new google.maps.LatLng(85.02070771743472, -178.48388434375), new google.maps.LatLng(-85.08136444384544, 178.00048865625));
+  }
+  return this.getExtendedBounds(mapBounds);
+};
+
+
+/**
+ * Refresh the map (presumably after the bounds or zoom changed).
+ */
+MarkerClusterer.prototype.refresh_ = function () {
+  var bounds = this.getExtendedMapBounds();
+  var shouldAnimate = this.declusterAnimationDuration && this.underDeclusterAnimationThreshold_(bounds);
+
+  if (shouldAnimate && !this.anyClusterIconsVisible()) {
+    // Already declustered.
+    return;
+  }
+
+  this.resetViewport_(false);
+
+  if(shouldAnimate) {
+    this.animateDeclustering_();
+  } else {
+    this.redraw_();
+  }
+};
+
+
+MarkerClusterer.prototype.underDeclusterAnimationThreshold_ = function (bounds) {
+  return this.countMarkersInBounds(bounds) < this.declusterAnimationMarkerThreshold;
+};
+
+
+MarkerClusterer.prototype.countMarkersInBounds = function (bounds) {
+  var count = 0;
+  for (i = 0; i < this.markers_.length; i++) {
+    if (this.isMarkerInBounds_(this.markers_[i], bounds)) {
+      count++;
+    }
+  }
+  return count;
+};
+
+
+MarkerClusterer.prototype.animateDeclustering_ = function () {
+  var cluster, marker, center;
+  var i, j;
+  for (i = 0; i < this.oldClusters_.length; i++) {
+    cluster = this.oldClusters_[i];
+    cluster.clusterIcon_.setMap(null);
+    center = cluster.getCenter();
+    for (j = 0; j < cluster.markers_.length; j++) {
+      marker = cluster.markers_[j];
+      marker.setMap(this.getMap());
+      this.animateMarkerFrom_(center, marker);
+    }
+  }
+};
+
+
+MarkerClusterer.prototype.animateMarkerFrom_ = function (position, marker) {
+  var realPosition = marker.getPosition();
+  marker.setPosition(position);
+  // Note: animateTo is dependent on markerAnimate.js
+  marker.animateTo(realPosition, {
+    easing: this.declusterAnimationEasing,
+    duration: this.declusterAnimationDuration
+  });
+};
+
+
+MarkerClusterer.prototype.anyClusterIconsVisible = function () {
+  var i;
+  for (i = 0; i < this.clusters_.length; i++) {
+    if (this.clusters_[i].isIconVisible()) {
+      return true;
+    }
+  }
+  return false;
 };
 
 
