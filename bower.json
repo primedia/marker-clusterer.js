@@ -1,9 +1,8 @@
 {
   "name": "marker-clusterer",
-  "version": "2.1.1.rp.1.0.0",
+  "version": "2.1.1.rp.1.0.1",
   "main": "marker-clusterer.js",
   "dependencies": {
-    "marker-animate": "https://raw.githubusercontent.com/combatwombat/marker-animate/1a1f75868960bab545315b0725882d61abcd626c/markerAnimate.js"
   },
   "ignore": [
     "package.json",
