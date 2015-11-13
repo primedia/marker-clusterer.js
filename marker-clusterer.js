@@ -1571,8 +1571,8 @@ MarkerClusterer.prototype.getExtendedMapBounds = function () {
  * Refresh the map (presumably after the bounds or zoom changed).
  */
 MarkerClusterer.prototype.refresh_ = function () {
-  var bounds = this.getExtendedMapBounds();
-  var shouldAnimate = this.declusterAnimationDuration && this.underDeclusterAnimationThreshold_(bounds);
+  var shouldAnimate = this.declusterAnimationDuration &&
+      (this.countMarkersInCurrentBounds() <= this.declusterAnimationMarkerThreshold);
 
   if (shouldAnimate && !this.anyClusterIconsVisible()) {
     // Already declustered.
@@ -1589,8 +1589,8 @@ MarkerClusterer.prototype.refresh_ = function () {
 };
 
 
-MarkerClusterer.prototype.underDeclusterAnimationThreshold_ = function (bounds) {
-  return this.countMarkersInBounds(bounds) < this.declusterAnimationMarkerThreshold;
+MarkerClusterer.prototype.countMarkersInCurrentBounds = function () {
+  return this.countMarkersInBounds(this.getExtendedMapBounds());
 };
 
 
