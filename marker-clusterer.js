@@ -1388,9 +1388,10 @@ MarkerClusterer.prototype.getExtendedBounds = function (bounds) {
 
 /**
  * Redraws all the clusters.
+ * @param {LatLngBounds} bounds [optional]
  */
-MarkerClusterer.prototype.redraw_ = function () {
-  this.createClusters_(0);
+MarkerClusterer.prototype.redraw_ = function (bounds) {
+  this.createClusters_(0, bounds);
 };
 
 
@@ -1494,8 +1495,9 @@ MarkerClusterer.prototype.addToClosestCluster_ = function (marker) {
  *
  * @param {number} iFirst The index of the first marker in the batch of
  *  markers to be added to clusters.
+ * @param {LatLngBounds} bounds [optional] Defaults to current map bounds.
  */
-MarkerClusterer.prototype.createClusters_ = function (iFirst) {
+MarkerClusterer.prototype.createClusters_ = function (iFirst, bounds) {
   var i, marker;
   var cMarkerClusterer = this;
   if (!this.ready_) {
@@ -1519,7 +1521,9 @@ MarkerClusterer.prototype.createClusters_ = function (iFirst) {
     }
   }
 
-  var bounds = this.getExtendedMapBounds();
+  if (!bounds) {
+    bounds = this.getExtendedMapBounds();
+  }
 
   var iLast = Math.min(iFirst + this.batchSize_, this.markers_.length);
 
@@ -1534,7 +1538,7 @@ MarkerClusterer.prototype.createClusters_ = function (iFirst) {
 
   if (iLast < this.markers_.length) {
     this.timerRefStatic = setTimeout(function () {
-      cMarkerClusterer.createClusters_(iLast);
+      cMarkerClusterer.createClusters_(iLast, bounds);
     }, 0);
   } else {
     delete this.timerRefStatic;
@@ -1571,8 +1575,9 @@ MarkerClusterer.prototype.getExtendedMapBounds = function () {
  * Refresh the map (presumably after the bounds or zoom changed).
  */
 MarkerClusterer.prototype.refresh_ = function () {
+  var bounds = this.getExtendedMapBounds();
   var shouldAnimate = this.declusterAnimationDuration &&
-      (this.countMarkersInCurrentBounds() <= this.declusterAnimationMarkerThreshold);
+      (this.countMarkersInBounds(bounds) <= this.declusterAnimationMarkerThreshold);
 
   if (shouldAnimate && !this.anyClusterIconsVisible()) {
     // Already declustered.
@@ -1582,15 +1587,10 @@ MarkerClusterer.prototype.refresh_ = function () {
   this.resetViewport_(false);
 
   if(shouldAnimate) {
-    this.animateDeclustering_();
+    this.animateDeclustering_(bounds);
   } else {
-    this.redraw_();
+    this.redraw_(bounds);
   }
-};
-
-
-MarkerClusterer.prototype.countMarkersInCurrentBounds = function () {
-  return this.countMarkersInBounds(this.getExtendedMapBounds());
 };
 
 
@@ -1605,17 +1605,21 @@ MarkerClusterer.prototype.countMarkersInBounds = function (bounds) {
 };
 
 
-MarkerClusterer.prototype.animateDeclustering_ = function () {
-  var cluster, marker, center;
+MarkerClusterer.prototype.animateDeclustering_ = function (bounds) {
+  var cluster, marker, center, inBounds;
   var i, j;
   for (i = 0; i < this.oldClusters_.length; i++) {
     cluster = this.oldClusters_[i];
     cluster.clusterIcon_.setMap(null);
     center = cluster.getCenter();
+    inBounds = bounds.contains(center);
     for (j = 0; j < cluster.markers_.length; j++) {
       marker = cluster.markers_[j];
       marker.setMap(this.getMap());
-      this.animateMarkerFrom_(center, marker);
+      // Don't bother animating clusters outside of the visible bounds.
+      if (inBounds) {
+        this.animateMarkerFrom_(center, marker);
+      }
     }
   }
 };
@@ -1623,6 +1627,9 @@ MarkerClusterer.prototype.animateDeclustering_ = function () {
 
 MarkerClusterer.prototype.animateMarkerFrom_ = function (position, marker) {
   var realPosition = marker.getPosition();
+  if (realPosition === position) {
+    return;
+  }
   marker.setPosition(position);
   // Note: animateTo is dependent on markerAnimate.js
   marker.animateTo(realPosition, {
