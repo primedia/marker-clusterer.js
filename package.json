@@ -11,11 +11,9 @@
   "author": {
     "name": "Luke Mahe"
   },
-  "repositories": [
-    {
-        "type": "git",
-        "url": "https://github.com/primedia/preserves.git"
-    }
-  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/primedia/preserves.git"
+  },
   "github": "https://github.com/primedia/preserves.git"
 }
